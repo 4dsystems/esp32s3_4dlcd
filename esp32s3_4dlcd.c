@@ -35,6 +35,33 @@ static esp_err_t esp32s3_4dlcd_swap_xy(esp_lcd_panel_t *panel, bool swap_axes);
 static esp_err_t esp32s3_4dlcd_set_gap(esp_lcd_panel_t *panel, int x_gap, int y_gap);
 static esp_err_t esp32s3_4dlcd_disp_on_off(esp_lcd_panel_t *panel, bool off);
 
+#if defined(CONFIG_LCD_INTERFACE_QSPI)
+#define LCD_OPCODE_WRITE_CMD        (0x02ULL)
+#define LCD_OPCODE_READ_CMD         (0x03ULL)
+#define LCD_OPCODE_WRITE_COLOR      (0x32ULL)
+
+static esp_err_t tx_param(esp_lcd_panel_io_handle_t io, int lcd_cmd, const void *param, size_t param_size)
+{
+    lcd_cmd &= 0xff;
+    lcd_cmd <<= 8;
+    lcd_cmd |= LCD_OPCODE_WRITE_CMD << 24;
+    return esp_lcd_panel_io_tx_param(io, lcd_cmd, param, param_size);
+}
+
+static esp_err_t tx_color(esp_lcd_panel_io_handle_t io, int lcd_cmd, const void *param, size_t param_size)
+{
+    lcd_cmd &= 0xff;
+    lcd_cmd <<= 8;
+    lcd_cmd |= LCD_OPCODE_WRITE_COLOR << 24;
+    return esp_lcd_panel_io_tx_color(io, lcd_cmd, param, param_size);
+}
+#else // CONFIG_LCD_INTERFACE_SPI
+#define tx_param(io, lcd_cmd, param, param_size) \
+    esp_lcd_panel_io_tx_param(io, lcd_cmd, param, param_size)
+#define tx_color(io, lcd_cmd, param, param_size) \
+    esp_lcd_panel_io_tx_color(io, lcd_cmd, param, param_size)
+#endif
+
 typedef struct {
     esp_lcd_panel_t base;
     esp_lcd_panel_io_handle_t io;
@@ -58,12 +85,6 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
     ESP_GOTO_ON_FALSE(io && ret_panel, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
     esp32s3_4dlcd = (esp32s3_4dlcd_panel_t *)calloc(1, sizeof(esp32s3_4dlcd_panel_t));
     ESP_GOTO_ON_FALSE(esp32s3_4dlcd, ESP_ERR_NO_MEM, err, TAG, "no mem for esp32s3_4dlcd panel");
-
-// #if defined(CONFIG_ESP32S3_4DLCD_43Q)
-//     // We need to override the tx_param and tx_color functions for 4.3" QSPI display
-//     io->tx_param = lcd_43q_panel_io_tx_param;
-//     io->tx_color = lcd_43q_panel_io_tx_color;
-// #endif    
 
 #if LCD_RST_GPIO_NUM >= 0
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -144,7 +165,7 @@ static esp_err_t esp32s3_4dlcd_reset(esp_lcd_panel_t *panel)
         gpio_set_level(esp32s3_4dlcd->reset_gpio_num, !esp32s3_4dlcd->reset_level);
         vTaskDelay(pdMS_TO_TICKS(10));
     } else { // perform software reset
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_SWRESET, NULL, 0), TAG, "send command failed");
+        ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_SWRESET, NULL, 0), TAG, "send command failed");
         vTaskDelay(pdMS_TO_TICKS(20)); // spec, wait at least 5ms before sending new command
     }
 
@@ -310,14 +331,14 @@ static esp_err_t esp32s3_4dlcd_init(esp_lcd_panel_t *panel)
     esp_lcd_panel_io_handle_t io = esp32s3_4dlcd->io;
 
     // LCD goes into sleep mode and display will be turned off after power on reset, exit sleep mode first
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_SLPOUT, NULL, 0), TAG, "send command failed");
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_SLPOUT, NULL, 0), TAG, "send command failed");
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_MADCTL, ((uint8_t[]) {
         esp32s3_4dlcd->madctl_val,
-    }, 1), TAG, "send command failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_COLMOD, (uint8_t[]) {
+    }), 1), TAG, "send command failed");
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_COLMOD, ((uint8_t[]) {
         esp32s3_4dlcd->colmod_val,
-    }, 1), TAG, "send command failed");
+    }), 1), TAG, "send command failed");
 
     const esp32s3_4dlcd_init_cmd_t *init_cmds = vendor_specific_init_default;
     uint16_t init_cmds_size = sizeof(vendor_specific_init_default) / sizeof(esp32s3_4dlcd_init_cmd_t);
@@ -344,7 +365,7 @@ static esp_err_t esp32s3_4dlcd_init(esp_lcd_panel_t *panel)
         }
 
         // TODO: this might not work for QSPI 4.3" display
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG, "send command failed");
+        ESP_RETURN_ON_ERROR(tx_param(io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG, "send command failed");
         vTaskDelay(pdMS_TO_TICKS(init_cmds[i].delay_ms));
     }
     ESP_LOGD(TAG, "send init commands success");
@@ -364,21 +385,21 @@ static esp_err_t esp32s3_4dlcd_draw_bitmap(esp_lcd_panel_t *panel, int x_start, 
     y_end += esp32s3_4dlcd->y_gap;
 
     // define an area of frame memory where MCU can access
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_CASET, (uint8_t[]) {
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_CASET, ((uint8_t[]) {
         (x_start >> 8) & 0xFF,
         x_start & 0xFF,
         ((x_end - 1) >> 8) & 0xFF,
         (x_end - 1) & 0xFF,
-    }, 4), TAG, "send command failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_RASET, (uint8_t[]) {
+    }), 4), TAG, "send command failed");
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_RASET, ((uint8_t[]) {
         (y_start >> 8) & 0xFF,
         y_start & 0xFF,
         ((y_end - 1) >> 8) & 0xFF,
         (y_end - 1) & 0xFF,
-    }, 4), TAG, "send command failed");
+    }), 4), TAG, "send command failed");
     // transfer frame buffer
     size_t len = (x_end - x_start) * (y_end - y_start) * esp32s3_4dlcd->fb_bits_per_pixel / 8;
-    esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, color_data, len);
+    tx_color(io, LCD_CMD_RAMWR, color_data, len);
 
     return ESP_OK;
 }
@@ -393,7 +414,7 @@ static esp_err_t esp32s3_4dlcd_invert_color(esp_lcd_panel_t *panel, bool invert_
     } else {
         command = LCD_CMD_INVOFF;
     }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, command, NULL, 0), TAG, "send command failed");
+    ESP_RETURN_ON_ERROR(tx_param(io, command, NULL, 0), TAG, "send command failed");
     return ESP_OK;
 }
 
@@ -411,7 +432,7 @@ static esp_err_t esp32s3_4dlcd_mirror(esp_lcd_panel_t *panel, bool mirror_x, boo
     } else {
         esp32s3_4dlcd->madctl_val &= ~LCD_CMD_MY_BIT;
     }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
         esp32s3_4dlcd->madctl_val
     }, 1), TAG, "send command failed");
     return ESP_OK;
@@ -426,7 +447,7 @@ static esp_err_t esp32s3_4dlcd_swap_xy(esp_lcd_panel_t *panel, bool swap_axes)
     } else {
         esp32s3_4dlcd->madctl_val &= ~LCD_CMD_MV_BIT;
     }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
+    ESP_RETURN_ON_ERROR(tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
         esp32s3_4dlcd->madctl_val
     }, 1), TAG, "send command failed");
     return ESP_OK;
@@ -450,7 +471,7 @@ static esp_err_t esp32s3_4dlcd_disp_on_off(esp_lcd_panel_t *panel, bool on_off)
     } else {
         command = LCD_CMD_DISPOFF;
     }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, command, NULL, 0), TAG, "send command failed");
+    ESP_RETURN_ON_ERROR(tx_param(io, command, NULL, 0), TAG, "send command failed");
     return ESP_OK;
 }
 
@@ -480,12 +501,9 @@ esp_err_t backlight_init(void)
     return ESP_OK;
 }
 
-// Set brightness (0-1023)
-esp_err_t backlight_set(uint16_t brightness)
+// Set brightness (0-255)
+esp_err_t backlight_set(uint8_t brightness)
 {
-    // Clamp value to 10-bit range
-    brightness = (brightness > 1023) ? 1023 : brightness;
-    
     ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, brightness), TAG, "set backlight duty failed");
     ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0), TAG, "update backlight duty failed");
     return ESP_OK;

@@ -20,7 +20,11 @@
 #include "esp_check.h"
 #include "driver/ledc.h"
 
+#if defined(LCD_INTERFACE_RGB)
+#include "4dlcd_rgb.h" // TODO
+#else // LCD_INTERFACE_QSPI or LCD_INTERFACE_SPI
 #include "4dlcd_spi.h"
+#endif // LCD_INTERFACE
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,7 +75,7 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
  * @param[in] max_trans_sz Maximum transfer size in bytes
  *
  */
-#if (LCD_SPI_IS_QUAD != 1)
+#if defined(CONFIG_LCD_INTERFACE_SPI)
 #define ESP32S3_4DLCD_BUS_SPI_CONFIG(max_trans_sz)              \
     {                                                           \
         .sclk_io_num = LCD_SPI_SCLK_GPIO_NUM,                   \
@@ -81,7 +85,7 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
         .quadwp_io_num = -1,                                    \
         .max_transfer_sz = max_trans_sz,                        \
     }
-#else /* LCD_SPI_IS_QUAD == 1 */
+#elif defined(CONFIG_LCD_INTERFACE_QSPI)
 #define ESP32S3_4DLCD_BUS_SPI_CONFIG(max_trans_sz)              \
     {                                                           \
         .sclk_io_num = LCD_SPI_SCLK_GPIO_NUM,                   \
@@ -89,12 +93,11 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
         .data1_io_num = LCD_QSPI_DAT1_GPIO_NUM,                 \
         .data2_io_num = LCD_QSPI_DAT2_GPIO_NUM,                 \
         .data3_io_num = LCD_QSPI_DAT3_GPIO_NUM,                 \
-        .quadhd_io_num = -1,                                    \
-        .quadwp_io_num = -1,                                    \
         .max_transfer_sz = max_trans_sz,                        \
-        .flags = SPICOMMON_BUSFLAG_QUAD,                        \
     }
-#endif /* LCD_SPI_IS_QUAD != 1 */
+#else // CONFIG_ LCD_INTERFACE_RGB
+// TODO
+#endif // CONFIG_LCD_INTERFACE
 
 /**
  * @brief LCD panel IO configuration structure
@@ -103,6 +106,7 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
  * @param[in] cb_ctx Callback function context
  *
  */
+#if defined(CONFIG_LCD_INTERFACE_SPI)
 #define ESP32S3_4DLCD_IO_SPI_CONFIG(callback, callback_ctx)     \
     {                                                           \
         .cs_gpio_num = LCD_SPI_CS_GPIO_NUM,                     \
@@ -115,9 +119,24 @@ esp_err_t esp_lcd_new_esp32s3_4dlcd(const esp_lcd_panel_io_handle_t io, esp_lcd_
         .lcd_cmd_bits = 8,                                      \
         .lcd_param_bits = 8,                                    \
     }
+#else // CONFIG_LCD_INTERFACE_QSPI
+#define ESP32S3_4DLCD_IO_SPI_CONFIG(callback, callback_ctx)     \
+    {                                                           \
+        .cs_gpio_num = LCD_SPI_CS_GPIO_NUM,                     \
+        .dc_gpio_num = LCD_SPI_DC_GPIO_NUM,                     \
+        .spi_mode = 0,                                          \
+        .pclk_hz = LCD_SPI_PCLK_MHZ * 1000 * 1000,              \
+        .trans_queue_depth = 10,                                \
+        .on_color_trans_done = callback,                        \
+        .user_ctx = callback_ctx,                               \
+        .lcd_cmd_bits = 32,                                     \
+        .lcd_param_bits = 8,                                    \
+        .flags.quad_mode = true                                 \
+    }
+#endif // CONFIG_LCD_INTERFACE
 
 esp_err_t backlight_init(void);
-esp_err_t backlight_set(uint16_t brightness);
+esp_err_t backlight_set(uint8_t brightness);
 
 #ifdef __cplusplus
 }
