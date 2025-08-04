@@ -24,3 +24,9 @@ dependencies:
   esp32s3_4dlcd:
     git: https://github.com/4dsystems/esp32s3_4dlcd.git
 ```
+
+## Selecting the Display Series
+
+Run menuconfig and select the target option:
+
+![Display Selection](display-selection.png)
