@@ -1,0 +1,33 @@
+menu "4D Systems ESP32-S3 4D LCD Display Selection"
+
+choice
+    prompt "Select your display series"
+
+config ESP32S3_4DLCD_24
+    bool "gen4-ESP32-24 Series"
+    help
+      Select this if your display size is 2.4 inches.
+
+config ESP32S3_4DLCD_28
+    bool "gen4-ESP32-28 Series"
+    help
+      Select this if your display size is 2.8 inches.
+
+config ESP32S3_4DLCD_32
+    bool "gen4-ESP32-32 Series"
+    help
+      Select this if your display size is 3.2 inches.
+
+config ESP32S3_4DLCD_35
+    bool "gen4-ESP32-35 Series"
+    help
+      Select this if your display size is 3.5 inches.
+
+# config ESP32S3_4DLCD_43Q
+#     bool "gen4-ESP32Q-43 Series"
+#     help
+#       Select this if your display size is under gen4-ESP32Q-43 series.
+
+endchoice
+
+endmenu
